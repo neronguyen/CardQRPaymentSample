@@ -62,13 +62,11 @@ Keeping them separate is critical for safe payment retries.
 
 ### Partial Payment
 
-The payment gateway may return:
+An order may be fulfilled by multiple `PaymentIntent`s, each representing an atomic payment attempt using a specific
+payment method.
 
-- Full success
-- Partial success (only part of the amount is paid)
-- Failure
-
-The client stores and resumes payment state strictly based on gateway responses.
+Each `PaymentIntent` is either fully successful or failed.
+The order tracks the accumulated paid amount and the remaining amount to be paid.
 
 ---
 
@@ -111,9 +109,7 @@ This project follows Android security best practices for payment apps:
 - Stateful idempotency handling
 - Deterministic responses for:
     - Success
-    - Partial payment
     - Failure
-    - Timeout
 
 No real card, QR, or banking systems are used.
 
