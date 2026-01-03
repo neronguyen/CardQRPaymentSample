@@ -1,0 +1,36 @@
+sequenceDiagram
+    autonumber
+    participant User
+    participant App as POS App
+    participant Repo as Payment Repository
+    participant DB as Encrypted Local Storage
+    participant SDK as POS SDK
+    participant GW as Payment Gateway
+    User ->> App: Enter amount & start payment
+    App ->> Repo: startPayment(amount, Card)
+    Repo ->> Repo: Create PaymentIntent (intentId, idempotencyKey)
+    Repo ->> DB: Save PaymentIntent (PENDING)
+    Repo ->> SDK: Read card
+    SDK -->> Repo: Payment token
+    Repo ->> GW: charge(amount, idempotencyKey)
+
+    alt Success
+        GW -->> Repo: Success(transactionId)
+        Repo ->> DB: Update intent (COMPLETED, transactionId)
+        Repo -->> App: Payment success
+
+    else Failure (non-retryable)
+        GW -->> Repo: Failure(errorCode)
+        Repo ->> DB: Update intent (FAILED)
+        Repo -->> App: Payment failed
+
+    else Failure (retryable)
+        GW -->> Repo: Failed(retryable)
+        Repo ->> DB: Update intent (PENDING, lastError=retryable)
+        Repo -->> App: Payment retryable
+
+    else Timeout / Network error
+        GW --x Repo: No response
+        Repo ->> DB: Keep intent (PENDING)
+        Repo -->> App: Payment retryable
+    end
