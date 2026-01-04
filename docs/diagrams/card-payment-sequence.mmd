@@ -6,31 +6,40 @@ sequenceDiagram
     participant DB as Encrypted Local Storage
     participant SDK as POS SDK
     participant GW as Payment Gateway
-    User ->> App: Enter amount & start payment
-    App ->> Repo: startPayment(amount, Card)
-    Repo ->> Repo: Create PaymentIntent (intentId, idempotencyKey)
-    Repo ->> DB: Save PaymentIntent (PENDING)
-    Repo ->> SDK: Read card
-    SDK -->> Repo: Payment token
-    Repo ->> GW: charge(amount, idempotencyKey)
+    User ->> App: Enter amount and start payment
+    App ->> Repo: Create payment intent (amount, card)
+    Repo ->> Repo: Generate intentId and idempotencyKey
+    Repo ->> DB: Save payment intent (PENDING)
+    Repo -->> App: Payment intent created (intentId)
+    App ->> App: Navigate to card payment screen
+    App ->> Repo: Start card payment (intentId)
+
+    par Load intent state
+        Repo ->> DB: Load payment intent (intentId)
+        DB -->> Repo: Payment intent loaded<br>(includes idempotencyKey)
+    and Read card
+        Repo ->> SDK: Read card
+        SDK -->> Repo: Card token / EMV data
+    end
+
+    Repo ->> GW: Charge payment (amount, idempotencyKey, card token)
 
     alt Success
-        GW -->> Repo: Success(transactionId)
+        GW -->> Repo: Success (transactionId)
         Repo ->> DB: Update intent (COMPLETED, transactionId)
         Repo -->> App: Payment success
 
-    else Failure (non-retryable)
-        GW -->> Repo: Failure(errorCode)
-        Repo ->> DB: Update intent (FAILED)
+    else Failure (retryable=false)
+        GW -->> Repo: Failure (error, retryable=false)
+        Repo ->> DB: Update intent (FAILED, lastError=error)
         Repo -->> App: Payment failed
 
-    else Failure (retryable)
-        GW -->> Repo: Failed(retryable)
-        Repo ->> DB: Update intent (PENDING, lastError=retryable)
+    else Failure (retryable=true)
+        GW -->> Repo: Failure (error, retryable=true)
+        Repo ->> DB: Update intent (PENDING, lastError=error)
         Repo -->> App: Payment retryable
 
     else Timeout / Network error
         GW --x Repo: No response
-        Repo ->> DB: Keep intent (PENDING)
         Repo -->> App: Payment retryable
     end
