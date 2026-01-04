@@ -7,38 +7,37 @@ sequenceDiagram
     participant SDK as POS SDK
     participant GW as Payment Gateway
     User ->> App: Retry payment
-    App ->> Repo: retryPayment(intentId)
-    Repo ->> DB: Load PaymentIntent(intentId)
-    DB -->> Repo: intent(amount, idempotencyKey, status=PENDING)
+    App ->> Repo: Retry payment (intentId)
+    Repo ->> DB: Load payment intent (intentId)
+    DB -->> Repo: Payment intent loaded<br>(amount, idempotencyKey, status=PENDING)
 
-    alt Safe to retry without re-reading card
-        Note right of Repo: High confidence request was not sent<br>based on technical signals<br>nand token still valid
-        Repo ->> GW: retry charge(same idempotencyKey, same token)
+    alt Retry without re-reading card
+        Note right of Repo: High confidence request was not sent<br>and card token still valid
+        Repo ->> GW: Charge payment<br>(same idempotencyKey, same card token)
 
     else Card re-presentation required
-        Note right of Repo: Note right of Repo: Outcome uncertain or token expired<br>EMV compliance requires re-presentation
+        Note right of Repo: Outcome uncertain or token expired<br>EMV compliance requires re-presentation
         Repo ->> SDK: Read card again
-        SDK -->> Repo: New payment token
-        Repo ->> GW: Retry charge(same idempotencyKey, new token)
+        SDK -->> Repo: New card token / EMV data
+        Repo ->> GW: Charge payment<br>(same idempotencyKey, new card token)
     end
 
-    alt Gateway already processed
-        GW -->> Repo: Success(transactionId)
+    alt Success (already processed or processed now)
+        GW -->> Repo: Success (transactionId)
         Repo ->> DB: Update intent (COMPLETED, transactionId)
         Repo -->> App: Payment success
 
-    else Gateway processes now
-        GW -->> Repo: Success(transactionId)
-        Repo ->> DB: Update intent (COMPLETED, transactionId)
-        Repo -->> App: Payment success
-
-    else Retryable failure
-        GW -->> Repo: Failed(retryable)
-        Repo ->> DB: Update intent (PENDING, lastError=retryable)
-        Repo -->> App: Retry allowed
-
-    else Non-retryable failure
-        GW -->> Repo: Failed(errorCode)
-        Repo ->> DB: Update intent (FAILED)
+    else Failure (retryable=false)
+        GW -->> Repo: Failure (error, retryable=false)
+        Repo ->> DB: Update intent (FAILED, lastError=error)
         Repo -->> App: Payment failed
+
+    else Failure (retryable=true)
+        GW -->> Repo: Failure (error, retryable=true)
+        Repo ->> DB: Update intent (PENDING, lastError=error)
+        Repo -->> App: Payment retryable
+
+    else Timeout / Network error
+        GW --x Repo: No response
+        Repo -->> App: Payment retryable
     end
