@@ -1,0 +1,46 @@
+sequenceDiagram
+    autonumber
+    participant OS as Android OS
+    participant App as POS App
+    participant Repo as Payment Repository
+    participant DB as Encrypted Local Storage
+    participant GW as Payment Gateway
+
+    Note over App, Repo: Charge request was sent to gateway<br>but app terminated before receiving response
+
+    OS ->> OS: App process killed / device restart
+    OS ->> App: App restarted
+
+    App ->> App: Initialize application
+    App ->> Repo: Recover pending payment intents
+    Repo ->> DB: Load pending payment intents
+    DB -->> Repo: Pending intents<br>(amount, idempotencyKey, status=PENDING)
+
+    loop For each pending intent (serialized per intent)
+        Repo ->> Repo: Evaluate retry eligibility
+
+        alt Retry without re-reading card
+            Note right of Repo: High confidence request was sent or not sent<br>and card token still valid
+            Repo ->> GW: Charge payment<br>(same idempotencyKey, same card token)
+
+        else Card re-presentation required
+            Note right of Repo: Outcome uncertain or token expired<br>EMV compliance requires re-presentation
+            Note right of Repo: Do nothing (wait for user action)
+        end
+
+        alt Success (already processed or processed now)
+            GW -->> Repo: Success (transactionId)
+            Repo ->> DB: Update intent (COMPLETED, transactionId)
+
+        else Failure (retryable=true)
+            GW -->> Repo: Failure (error, retryable=true)
+            Repo ->> DB: Update intent (PENDING, lastError=error)
+
+        else Failure (retryable=false)
+            GW -->> Repo: Failure (error, retryable=false)
+            Repo ->> DB: Update intent (FAILED, lastError=error)
+
+        else Timeout / Network error
+            GW --x Repo: No response
+        end
+    end
