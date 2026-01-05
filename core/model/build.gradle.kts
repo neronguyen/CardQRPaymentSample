@@ -4,4 +4,7 @@ plugins {
 
 kotlin {
     jvmToolchain(25)
+    compilerOptions {
+        optIn.add("kotlin.uuid.ExperimentalUuidApi")
+    }
 }
